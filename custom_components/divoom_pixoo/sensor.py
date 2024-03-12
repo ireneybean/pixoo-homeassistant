@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import asyncio
 import logging
 from datetime import timedelta
@@ -39,6 +40,84 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_entities)
         'async_show_message',
     )
 
+def create_renderer(config, hass):
+    page_type = config['page_type'].lower
+
+    klass={"channel": ChannelRenderer, 
+            "clock": ClockRenderer, 
+            "pv": SolarRenderer, 
+            "fuel":FuelRenderer}.get(page_type, ComponentsRenderer)
+    
+    klass(config, hass)
+
+class PageRenderer(ABC):
+    def __init__(self, config, hass):
+        self.id=config['id']
+        self.components=config['components']
+        self.hass=hass
+    
+    @abstractmethod
+    def render(self, pixoo):
+        raise NotImplementedError    
+
+class ChannelRenderer(PageRenderer):
+    def render(self, pixoo):
+        pixoo.set_custom_page(self.id)
+
+class ClockRenderer(PageRenderer):
+    def render(self, pixoo):
+        pixoo.set_clock(self.id)        
+
+class SolarRenderer(PageRenderer):
+    def render(self,pixoo):
+        def render(self, pixoo):
+            solar(pixoo, self.hass, self.config, FONT_PICO_8, FONT_GICKO)
+            pixoo.push()          
+class FuelRenderer(PageRenderer):
+    def render(self, pixoo):
+            fuel(pixoo, self.hass, self.config, FONT_PICO_8, FONT_GICKO, FIVE_PIX, ELEVEN_PIX)
+            pixoo.push()   
+class ComponentsRenderer(PageRenderer):
+    def render(self, pixoo):
+        for component in self.components:
+            if component['type'] == "text":
+                text_template = Template(component['content'], self.hass)
+                try:
+                    rendered_text = str(text_template.async_render())
+                except TemplateError as e:
+                    _LOGGER.error("Template render error: %s", e)
+                    rendered_text = "Template Error"
+
+                font = FONT_PICO_8  # Font by default.
+                if component['font'] == "PICO_8":
+                    font = FONT_PICO_8
+                elif component['font'] == "GICKO":
+                    font = FONT_GICKO
+                elif component['font'] == "FIVE_PIX":
+                    font = FIVE_PIX
+
+                try:
+                    rendered_color = Template(str(component['color']), self.hass).async_render()
+                    if isinstance(rendered_color, list):
+                        rendered_color = tuple(rendered_color)
+                    elif rendered_color in CSS4_COLORS:
+                        rendered_color = get_rgb(rendered_color)
+                    else:
+                        rendered_color = get_rgb("white")
+
+                except TemplateError as e:
+                    _LOGGER.error("Template render error: %s", e)
+                    rendered_color = get_rgb("white")
+
+                pixoo.draw_text(rendered_text.upper(), tuple(component['position']), rendered_color, font)
+
+            elif component['type'] == "image":
+                try:
+                    rendered_image_path = Template(str(component['image_path']), self.hass).async_render()
+                    pixoo.draw_image(rendered_image_path, tuple(component['position']))
+                except TemplateError as e:
+                    _LOGGER.error("Template render error: %s", e)
+            
 
 class Pixoo64(Entity):
 
@@ -109,6 +188,8 @@ class Pixoo64(Entity):
     def _render_page(self, page):
         pixoo = self._pixoo
         pixoo.clear()
+
+        RendererFactory(page).render()
 
         if page['page_type'].lower() == "channel":
             pixoo.set_custom_page(page['id'])
